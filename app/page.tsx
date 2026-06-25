@@ -32,7 +32,7 @@ export default function Home() {
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [evaluating, setEvaluating] = useState(false);
   const [finished, setFinished] = useState(false);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recognitionRef = useRef<any>(null);
 
   const generateInterview = async () => {
     if (!jd.trim()) return;
@@ -76,7 +76,7 @@ export default function Home() {
       alert('Speech recognition not supported. Please use Chrome or Edge.');
       return;
     }
-    const rec = new SpeechRecognition();
+    const rec = new (window.SpeechRecognition || window.webkitSpeechRecognition)() as any;
     rec.lang = 'en-US';
     rec.interimResults = false;
     rec.onresult = (e) => {
