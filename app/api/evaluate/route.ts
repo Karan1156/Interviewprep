@@ -14,10 +14,10 @@ export async function POST(req: Request) {
 
     const groq = new Groq({ apiKey });
 
-    // Build the Q&A transcript
+    // Build Q&A transcript
     const qaText = questions
       .map((q: any, i: number) => {
-        return `Q${i + 1}: ${q.question}\nCandidate's Answer: ${answers[i] || 'No answer'}\nIdeal Answer: ${q.idealAnswer}`;
+        return `Q${i + 1}: ${q.question}\nCandidate Answer: ${answers[i] || 'No answer'}\nIdeal Answer: ${q.idealAnswer}`;
       })
       .join('\n\n');
 

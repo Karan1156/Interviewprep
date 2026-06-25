@@ -71,23 +71,22 @@ export default function Home() {
   };
 
   const startListening = () => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       alert('Speech recognition not supported. Please use Chrome or Edge.');
       return;
     }
-    const rec = new (window.SpeechRecognition || window.webkitSpeechRecognition)() as any;
+    const rec = new SpeechRecognition();
     rec.lang = 'en-US';
     rec.interimResults = false;
-    rec.onresult = (e) => {
+    rec.onresult = (e: any) => {
       const transcript = e.results[0][0].transcript;
       setUserAnswer(transcript);
-      // Save answer to array
       const newAnswers = [...answers];
       newAnswers[currentIndex] = transcript;
       setAnswers(newAnswers);
     };
-    rec.onerror = (e) => {
+    rec.onerror = (e: any) => {
       console.error('Speech error:', e.error);
       if (e.error === 'not-allowed') {
         alert('Please allow microphone access to record your answer.');
@@ -158,40 +157,6 @@ export default function Home() {
     setFinished(false);
   };
 
-  const ScoreCircle = ({ score, label }: { score: number; label: string }) => (
-    <div className="flex flex-col items-center">
-      <div className="relative w-24 h-24">
-        <svg className="w-24 h-24 transform -rotate-90">
-          <circle
-            cx="48"
-            cy="48"
-            r="40"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="8"
-            className="text-white/10"
-          />
-          <circle
-            cx="48"
-            cy="48"
-            r="40"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="8"
-            strokeDasharray={`${2 * Math.PI * 40}`}
-            strokeDashoffset={`${2 * Math.PI * 40 * (1 - score / 100)}`}
-            className={score >= 70 ? 'text-green-400' : score >= 40 ? 'text-yellow-400' : 'text-red-400'}
-            strokeLinecap="round"
-          />
-        </svg>
-        <span className="absolute inset-0 flex items-center justify-center text-2xl font-bold text-white">
-          {score}%
-        </span>
-      </div>
-      <span className="text-gray-400 text-sm mt-2">{label}</span>
-    </div>
-  );
-
   // ---- FINISHED / EVALUATION SCREEN ----
   if (finished && evaluation) {
     return (
@@ -200,7 +165,7 @@ export default function Home() {
           <div className="text-center mb-8">
             <span className="text-5xl mb-4 block">🎉</span>
             <h1 className="text-3xl font-bold text-white">Interview Complete!</h1>
-            <p className="text-gray-400 mt-2">Here's your performance evaluation</p>
+            <p className="text-gray-400 mt-2">Here is your performance evaluation</p>
           </div>
 
           {/* Overall Score */}
@@ -247,7 +212,7 @@ export default function Home() {
             <div className="bg-green-500/10 backdrop-blur-lg rounded-xl p-5 border border-green-500/20">
               <h3 className="text-green-300 font-semibold mb-3">✅ Strengths</h3>
               <ul className="space-y-2">
-                {evaluation.strengths.map((s, i) => (
+                {evaluation.strengths.map((s: string, i: number) => (
                   <li key={i} className="text-gray-300 text-sm flex gap-2">
                     <span>•</span> {s}
                   </li>
@@ -257,7 +222,7 @@ export default function Home() {
             <div className="bg-orange-500/10 backdrop-blur-lg rounded-xl p-5 border border-orange-500/20">
               <h3 className="text-orange-300 font-semibold mb-3">📈 Areas to Improve</h3>
               <ul className="space-y-2">
-                {evaluation.areasToImprove.map((a, i) => (
+                {evaluation.areasToImprove.map((a: string, i: number) => (
                   <li key={i} className="text-gray-300 text-sm flex gap-2">
                     <span>•</span> {a}
                   </li>
@@ -270,7 +235,7 @@ export default function Home() {
           <div className="bg-blue-500/10 backdrop-blur-lg rounded-xl p-5 border border-blue-500/20 mb-6">
             <h3 className="text-blue-300 font-semibold mb-3">💡 Tips for Next Time</h3>
             <ul className="space-y-2">
-              {evaluation.tips.map((t, i) => (
+              {evaluation.tips.map((t: string, i: number) => (
                 <li key={i} className="text-gray-300 text-sm flex gap-2">
                   <span>{i + 1}.</span> {t}
                 </li>
@@ -336,7 +301,7 @@ export default function Home() {
                 <textarea
                   className="w-full h-48 p-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none transition-all"
                   value={jd}
-                  onChange={(e) => setJd(e.target.value)}
+                  onChange={(e: any) => setJd(e.target.value)}
                   placeholder="Paste the full job description here..."
                 />
                 {error && (
@@ -375,7 +340,7 @@ export default function Home() {
   // ---- INTERVIEW SCREEN ----
   const currentQ = questions[currentIndex];
   const progress = ((currentIndex + 1) / questions.length) * 100;
-  const answeredCount = answers.filter(a => a && a.trim()).length;
+  const answeredCount = answers.filter((a: string) => a && a.trim()).length;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-4">
