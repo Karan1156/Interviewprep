@@ -33,6 +33,7 @@ export default function Home() {
   const [evaluating, setEvaluating] = useState(false);
   const [finished, setFinished] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const finalTranscriptRef = useRef<string>('');
 
   const generateInterview = async () => {
     if (!jd.trim()) return;
@@ -72,35 +73,112 @@ export default function Home() {
 
   const startListening = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
     if (!SpeechRecognition) {
       alert('Speech recognition not supported. Please use Chrome or Edge.');
       return;
     }
+
+    // Check microphone permission
+    navigator.mediaDevices?.getUserMedia({ audio: true })
+      .then(() => {
+        console.log('Microphone permission granted');
+      })
+      .catch((err) => {
+        console.error('Microphone permission denied:', err);
+        alert('Please allow microphone access. Click the lock icon in your browser address bar.');
+        return;
+      });
+
     const rec = new SpeechRecognition();
     rec.lang = 'en-US';
-    rec.interimResults = false;
+    rec.interimResults = true;
+    rec.continuous = true;
+    rec.maxAlternatives = 1;
+
+    finalTranscriptRef.current = '';
+
+    rec.onstart = () => {
+      console.log('✅ Speech recognition started');
+      setIsListening(true);
+    };
+
     rec.onresult = (e: any) => {
-      const transcript = e.results[0][0].transcript;
-      setUserAnswer(transcript);
+      console.log('🎤 Speech result received');
+      let interimTranscript = '';
+      
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const transcript = e.results[i][0].transcript;
+        console.log('  - Result', i, ':', transcript, '(isFinal:', e.results[i].isFinal, ')');
+        
+        if (e.results[i].isFinal) {
+          finalTranscriptRef.current += transcript + ' ';
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+      
+      const displayText = (finalTranscriptRef.current + interimTranscript).trim();
+      console.log('📝 Display text:', displayText);
+      setUserAnswer(displayText);
+      
+      // Save to answers array
       const newAnswers = [...answers];
-      newAnswers[currentIndex] = transcript;
+      newAnswers[currentIndex] = displayText;
       setAnswers(newAnswers);
     };
+
     rec.onerror = (e: any) => {
-      console.error('Speech error:', e.error);
-      if (e.error === 'not-allowed') {
-        alert('Please allow microphone access to record your answer.');
+      console.error('❌ Speech error:', e.error, e.message);
+      
+      switch (e.error) {
+        case 'not-allowed':
+          alert('Microphone access denied. Please click the lock icon in the address bar and allow microphone.');
+          break;
+        case 'no-speech':
+          console.log('No speech detected, continuing...');
+          break;
+        case 'audio-capture':
+          alert('No microphone found. Please connect a microphone.');
+          break;
+        case 'network':
+          alert('Network error. Speech recognition requires an internet connection.');
+          break;
+        case 'aborted':
+          console.log('Speech recognition aborted');
+          break;
+        default:
+          console.log('Speech error:', e.error);
       }
       setIsListening(false);
     };
-    rec.onend = () => setIsListening(false);
-    rec.start();
-    setIsListening(true);
-    recognitionRef.current = rec;
+
+    rec.onend = () => {
+      console.log('🏁 Speech recognition ended');
+      setIsListening(false);
+      
+      // Save final answer
+      if (finalTranscriptRef.current.trim()) {
+        const newAnswers = [...answers];
+        newAnswers[currentIndex] = finalTranscriptRef.current.trim();
+        setAnswers(newAnswers);
+        setUserAnswer(finalTranscriptRef.current.trim());
+      }
+    };
+
+    try {
+      rec.start();
+      recognitionRef.current = rec;
+    } catch (err) {
+      console.error('Failed to start speech recognition:', err);
+      setIsListening(false);
+    }
   };
 
   const stopListening = () => {
-    recognitionRef.current?.stop();
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
     setIsListening(false);
   };
 
@@ -405,7 +483,7 @@ export default function Home() {
                 <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
                 <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
               </div>
-              <span className="text-green-300 font-medium">Listening...</span>
+              <span className="text-green-300 font-medium">Listening... Speak clearly now!</span>
             </div>
           )}
         </div>
