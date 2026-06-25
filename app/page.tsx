@@ -32,6 +32,7 @@ export default function Home() {
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [evaluating, setEvaluating] = useState(false);
   const [finished, setFinished] = useState(false);
+  const [inputMode, setInputMode] = useState<'voice' | 'text'>('voice'); // NEW
   const recognitionRef = useRef<any>(null);
   const finalTranscriptRef = useRef<string>('');
 
@@ -75,18 +76,18 @@ export default function Home() {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     
     if (!SpeechRecognition) {
-      alert('Speech recognition not supported. Please use Chrome or Edge.');
+      alert('Speech recognition not supported. Please use Chrome or Edge, or switch to Text mode.');
+      setInputMode('text');
       return;
     }
 
-    // Check microphone permission
     navigator.mediaDevices?.getUserMedia({ audio: true })
       .then(() => {
         console.log('Microphone permission granted');
       })
-      .catch((err) => {
-        console.error('Microphone permission denied:', err);
-        alert('Please allow microphone access. Click the lock icon in your browser address bar.');
+      .catch(() => {
+        alert('Please allow microphone access or switch to Text mode.');
+        setInputMode('text');
         return;
       });
 
@@ -104,12 +105,10 @@ export default function Home() {
     };
 
     rec.onresult = (e: any) => {
-      console.log('🎤 Speech result received');
       let interimTranscript = '';
       
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const transcript = e.results[i][0].transcript;
-        console.log('  - Result', i, ':', transcript, '(isFinal:', e.results[i].isFinal, ')');
         
         if (e.results[i].isFinal) {
           finalTranscriptRef.current += transcript + ' ';
@@ -119,36 +118,19 @@ export default function Home() {
       }
       
       const displayText = (finalTranscriptRef.current + interimTranscript).trim();
-      console.log('📝 Display text:', displayText);
       setUserAnswer(displayText);
       
-      // Save to answers array
       const newAnswers = [...answers];
       newAnswers[currentIndex] = displayText;
       setAnswers(newAnswers);
     };
 
     rec.onerror = (e: any) => {
-      console.error('❌ Speech error:', e.error, e.message);
+      console.error('Speech error:', e.error, e.message);
       
-      switch (e.error) {
-        case 'not-allowed':
-          alert('Microphone access denied. Please click the lock icon in the address bar and allow microphone.');
-          break;
-        case 'no-speech':
-          console.log('No speech detected, continuing...');
-          break;
-        case 'audio-capture':
-          alert('No microphone found. Please connect a microphone.');
-          break;
-        case 'network':
-          alert('Network error. Speech recognition requires an internet connection.');
-          break;
-        case 'aborted':
-          console.log('Speech recognition aborted');
-          break;
-        default:
-          console.log('Speech error:', e.error);
+      if (e.error === 'not-allowed') {
+        alert('Microphone access denied. Switching to Text mode.');
+        setInputMode('text');
       }
       setIsListening(false);
     };
@@ -157,7 +139,6 @@ export default function Home() {
       console.log('🏁 Speech recognition ended');
       setIsListening(false);
       
-      // Save final answer
       if (finalTranscriptRef.current.trim()) {
         const newAnswers = [...answers];
         newAnswers[currentIndex] = finalTranscriptRef.current.trim();
@@ -182,7 +163,15 @@ export default function Home() {
     setIsListening(false);
   };
 
+  // NEW: Save text answer
+  const saveTextAnswer = () => {
+    const newAnswers = [...answers];
+    newAnswers[currentIndex] = userAnswer;
+    setAnswers(newAnswers);
+  };
+
   const handleFinish = async () => {
+    saveTextAnswer(); // Save current answer before evaluating
     setEvaluating(true);
     try {
       const res = await fetch('/api/evaluate', {
@@ -202,6 +191,7 @@ export default function Home() {
   };
 
   const nextQuestion = () => {
+    saveTextAnswer(); // Save before moving
     if (currentIndex < questions.length - 1) {
       const nextIdx = currentIndex + 1;
       setCurrentIndex(nextIdx);
@@ -214,6 +204,7 @@ export default function Home() {
   };
 
   const prevQuestion = () => {
+    saveTextAnswer(); // Save before moving
     if (currentIndex > 0) {
       const prevIdx = currentIndex - 1;
       setCurrentIndex(prevIdx);
@@ -233,6 +224,7 @@ export default function Home() {
     setError('');
     setEvaluation(null);
     setFinished(false);
+    setInputMode('voice');
   };
 
   // ---- FINISHED / EVALUATION SCREEN ----
@@ -246,7 +238,6 @@ export default function Home() {
             <p className="text-gray-400 mt-2">Here is your performance evaluation</p>
           </div>
 
-          {/* Overall Score */}
           <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/10 mb-6">
             <div className="flex flex-col items-center">
               <div className="relative w-32 h-32 mb-4">
@@ -269,7 +260,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Detailed scores */}
           <div className="grid grid-cols-3 gap-4 mb-6">
             <div className="bg-white/5 rounded-xl p-4 text-center">
               <p className="text-2xl font-bold text-blue-400">{evaluation.technicalAccuracy}%</p>
@@ -285,7 +275,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Strengths & Improvements */}
           <div className="grid grid-cols-2 gap-4 mb-6">
             <div className="bg-green-500/10 backdrop-blur-lg rounded-xl p-5 border border-green-500/20">
               <h3 className="text-green-300 font-semibold mb-3">✅ Strengths</h3>
@@ -309,7 +298,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Tips */}
           <div className="bg-blue-500/10 backdrop-blur-lg rounded-xl p-5 border border-blue-500/20 mb-6">
             <h3 className="text-blue-300 font-semibold mb-3">💡 Tips for Next Time</h3>
             <ul className="space-y-2">
@@ -358,7 +346,7 @@ export default function Home() {
               <span className="text-3xl">🎯</span>
             </div>
             <h1 className="text-4xl font-bold text-white mb-2">AI Interview Prep</h1>
-            <p className="text-gray-400">Paste a job description and practice with voice-powered interviews</p>
+            <p className="text-gray-400">Paste a job description and practice with voice or text</p>
           </div>
 
           <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/10 shadow-2xl">
@@ -398,9 +386,10 @@ export default function Home() {
             )}
           </div>
 
-          <div className="grid grid-cols-3 gap-4 mt-6">
+          <div className="grid grid-cols-4 gap-4 mt-6">
             {[
-              { icon: '🎤', label: 'Voice Answers' },
+              { icon: '🎤', label: 'Voice Input' },
+              { icon: '⌨️', label: 'Text Input' },
               { icon: '📝', label: 'AI Evaluation' },
               { icon: '📊', label: 'Detailed Score' },
             ].map((f) => (
@@ -452,31 +441,75 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex gap-3 mt-8">
+          {/* INPUT MODE TOGGLE */}
+          <div className="flex gap-2 mt-6">
             <button
-              onClick={() => speak(currentQ.question)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-white/10 text-gray-300 rounded-xl hover:bg-white/20 transition-all"
+              onClick={() => setInputMode('voice')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                inputMode === 'voice'
+                  ? 'bg-purple-600 text-white'
+                  : 'bg-white/10 text-gray-400 hover:bg-white/20'
+              }`}
             >
-              🔁 Repeat
+              🎤 Voice
             </button>
-            {isListening ? (
-              <button
-                onClick={stopListening}
-                className="flex items-center gap-2 px-6 py-2.5 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all animate-pulse font-medium"
-              >
-                ⏹ Stop Recording
-              </button>
-            ) : (
-              <button
-                onClick={startListening}
-                className="flex items-center gap-2 px-6 py-2.5 bg-green-500 text-white rounded-xl hover:bg-green-600 transition-all font-medium"
-              >
-                🎤 Start Answer
-              </button>
-            )}
+            <button
+              onClick={() => setInputMode('text')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                inputMode === 'text'
+                  ? 'bg-purple-600 text-white'
+                  : 'bg-white/10 text-gray-400 hover:bg-white/20'
+              }`}
+            >
+              ⌨️ Text
+            </button>
           </div>
 
-          {isListening && (
+          {/* VOICE INPUT */}
+          {inputMode === 'voice' && (
+            <div className="flex gap-3 mt-4">
+              <button
+                onClick={() => speak(currentQ.question)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-white/10 text-gray-300 rounded-xl hover:bg-white/20 transition-all"
+              >
+                🔁 Repeat
+              </button>
+              {isListening ? (
+                <button
+                  onClick={stopListening}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all animate-pulse font-medium"
+                >
+                  ⏹ Stop Recording
+                </button>
+              ) : (
+                <button
+                  onClick={startListening}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-green-500 text-white rounded-xl hover:bg-green-600 transition-all font-medium"
+                >
+                  🎤 Start Answer
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* TEXT INPUT */}
+          {inputMode === 'text' && (
+            <div className="mt-4">
+              <textarea
+                className="w-full h-32 p-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none transition-all"
+                value={userAnswer}
+                onChange={(e) => {
+                  setUserAnswer(e.target.value);
+                  const newAnswers = [...answers];
+                  newAnswers[currentIndex] = e.target.value;
+                  setAnswers(newAnswers);
+                }}
+                placeholder="Type your answer here..."
+              />
+            </div>
+          )}
+
+          {isListening && inputMode === 'voice' && (
             <div className="mt-4 flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/30 rounded-xl">
               <div className="flex gap-1">
                 <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
@@ -495,7 +528,7 @@ export default function Home() {
                 <span className="text-xl">💬</span>
                 <h3 className="text-blue-300 font-semibold">Your Answer</h3>
               </div>
-              <p className="text-gray-200 leading-relaxed">{userAnswer}</p>
+              <p className="text-gray-200 leading-relaxed whitespace-pre-wrap">{userAnswer}</p>
             </div>
 
             {!showIdealAnswer ? (
