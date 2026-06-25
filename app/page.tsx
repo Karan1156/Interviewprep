@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 
 interface QA {
   question: string;
@@ -24,7 +24,8 @@ export default function Home() {
   const [answers, setAnswers] = useState<string[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswer, setUserAnswer] = useState('');
-  const [isListening, setIsListening] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [interviewStarted, setInterviewStarted] = useState(false);
   const [showIdealAnswer, setShowIdealAnswer] = useState(false);
@@ -32,9 +33,11 @@ export default function Home() {
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [evaluating, setEvaluating] = useState(false);
   const [finished, setFinished] = useState(false);
-  const [inputMode, setInputMode] = useState<'voice' | 'text'>('voice'); // NEW
-  const recognitionRef = useRef<any>(null);
-  const finalTranscriptRef = useRef<string>('');
+  const [inputMode, setInputMode] = useState<'voice' | 'text'>('voice');
+  
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const generateInterview = async () => {
     if (!jd.trim()) return;
@@ -72,98 +75,78 @@ export default function Home() {
     window.speechSynthesis.speak(u);
   };
 
-  const startListening = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    
-    if (!SpeechRecognition) {
-      alert('Speech recognition not supported. Please use Chrome or Edge, or switch to Text mode.');
-      setInputMode('text');
-      return;
-    }
-
-    navigator.mediaDevices?.getUserMedia({ audio: true })
-      .then(() => {
-        console.log('Microphone permission granted');
-      })
-      .catch(() => {
-        alert('Please allow microphone access or switch to Text mode.');
-        setInputMode('text');
-        return;
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4'
       });
-
-    const rec = new SpeechRecognition();
-    rec.lang = 'en-US';
-    rec.interimResults = true;
-    rec.continuous = true;
-    rec.maxAlternatives = 1;
-
-    finalTranscriptRef.current = '';
-
-    rec.onstart = () => {
-      console.log('✅ Speech recognition started');
-      setIsListening(true);
-    };
-
-    rec.onresult = (e: any) => {
-      let interimTranscript = '';
       
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const transcript = e.results[i][0].transcript;
-        
-        if (e.results[i].isFinal) {
-          finalTranscriptRef.current += transcript + ' ';
-        } else {
-          interimTranscript += transcript;
+      audioChunksRef.current = [];
+      
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
         }
-      }
+      };
       
-      const displayText = (finalTranscriptRef.current + interimTranscript).trim();
-      setUserAnswer(displayText);
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType });
+        await transcribeAudio(audioBlob);
+        
+        // Stop all tracks
+        stream.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      };
+      
+      mediaRecorder.start();
+      mediaRecorderRef.current = mediaRecorder;
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Recording error:', err);
+      alert('Could not access microphone. Please allow microphone access or switch to Text mode.');
+      setInputMode('text');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const transcribeAudio = async (audioBlob: Blob) => {
+    setIsTranscribing(true);
+    try {
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'recording.webm');
+      
+      const res = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) throw new Error(data.error || 'Transcription failed');
+      
+      const transcript = data.text || '';
+      setUserAnswer(transcript);
       
       const newAnswers = [...answers];
-      newAnswers[currentIndex] = displayText;
+      newAnswers[currentIndex] = transcript;
       setAnswers(newAnswers);
-    };
-
-    rec.onerror = (e: any) => {
-      console.error('Speech error:', e.error, e.message);
-      
-      if (e.error === 'not-allowed') {
-        alert('Microphone access denied. Switching to Text mode.');
-        setInputMode('text');
-      }
-      setIsListening(false);
-    };
-
-    rec.onend = () => {
-      console.log('🏁 Speech recognition ended');
-      setIsListening(false);
-      
-      if (finalTranscriptRef.current.trim()) {
-        const newAnswers = [...answers];
-        newAnswers[currentIndex] = finalTranscriptRef.current.trim();
-        setAnswers(newAnswers);
-        setUserAnswer(finalTranscriptRef.current.trim());
-      }
-    };
-
-    try {
-      rec.start();
-      recognitionRef.current = rec;
-    } catch (err) {
-      console.error('Failed to start speech recognition:', err);
-      setIsListening(false);
+    } catch (err: any) {
+      console.error('Transcription error:', err);
+      alert('Failed to transcribe audio. Please try again or use Text mode.');
+    } finally {
+      setIsTranscribing(false);
     }
   };
 
-  const stopListening = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
-    setIsListening(false);
-  };
-
-  // NEW: Save text answer
   const saveTextAnswer = () => {
     const newAnswers = [...answers];
     newAnswers[currentIndex] = userAnswer;
@@ -171,13 +154,18 @@ export default function Home() {
   };
 
   const handleFinish = async () => {
-    saveTextAnswer(); // Save current answer before evaluating
+    saveTextAnswer();
     setEvaluating(true);
     try {
+      const finalAnswers = [...answers];
+      if (userAnswer && !finalAnswers[currentIndex]) {
+        finalAnswers[currentIndex] = userAnswer;
+      }
+      
       const res = await fetch('/api/evaluate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ questions, answers, jd }),
+        body: JSON.stringify({ questions, answers: finalAnswers, jd }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Evaluation failed');
@@ -191,7 +179,7 @@ export default function Home() {
   };
 
   const nextQuestion = () => {
-    saveTextAnswer(); // Save before moving
+    saveTextAnswer();
     if (currentIndex < questions.length - 1) {
       const nextIdx = currentIndex + 1;
       setCurrentIndex(nextIdx);
@@ -204,7 +192,7 @@ export default function Home() {
   };
 
   const prevQuestion = () => {
-    saveTextAnswer(); // Save before moving
+    saveTextAnswer();
     if (currentIndex > 0) {
       const prevIdx = currentIndex - 1;
       setCurrentIndex(prevIdx);
@@ -225,6 +213,8 @@ export default function Home() {
     setEvaluation(null);
     setFinished(false);
     setInputMode('voice');
+    setIsRecording(false);
+    setIsTranscribing(false);
   };
 
   // ---- FINISHED / EVALUATION SCREEN ----
@@ -261,38 +251,32 @@ export default function Home() {
           </div>
 
           <div className="grid grid-cols-3 gap-4 mb-6">
-            <div className="bg-white/5 rounded-xl p-4 text-center">
-              <p className="text-2xl font-bold text-blue-400">{evaluation.technicalAccuracy}%</p>
-              <p className="text-gray-400 text-sm">Technical</p>
-            </div>
-            <div className="bg-white/5 rounded-xl p-4 text-center">
-              <p className="text-2xl font-bold text-purple-400">{evaluation.communicationClarity}%</p>
-              <p className="text-gray-400 text-sm">Communication</p>
-            </div>
-            <div className="bg-white/5 rounded-xl p-4 text-center">
-              <p className="text-2xl font-bold text-pink-400">{evaluation.relevantExamples}%</p>
-              <p className="text-gray-400 text-sm">Examples</p>
-            </div>
+            {[
+              { score: evaluation.technicalAccuracy, label: 'Technical', color: 'text-blue-400' },
+              { score: evaluation.communicationClarity, label: 'Communication', color: 'text-purple-400' },
+              { score: evaluation.relevantExamples, label: 'Examples', color: 'text-pink-400' },
+            ].map((s) => (
+              <div key={s.label} className="bg-white/5 rounded-xl p-4 text-center">
+                <p className={`text-2xl font-bold ${s.color}`}>{s.score}%</p>
+                <p className="text-gray-400 text-sm">{s.label}</p>
+              </div>
+            ))}
           </div>
 
           <div className="grid grid-cols-2 gap-4 mb-6">
             <div className="bg-green-500/10 backdrop-blur-lg rounded-xl p-5 border border-green-500/20">
               <h3 className="text-green-300 font-semibold mb-3">✅ Strengths</h3>
               <ul className="space-y-2">
-                {evaluation.strengths.map((s: string, i: number) => (
-                  <li key={i} className="text-gray-300 text-sm flex gap-2">
-                    <span>•</span> {s}
-                  </li>
+                {evaluation.strengths.map((s, i) => (
+                  <li key={i} className="text-gray-300 text-sm flex gap-2"><span>•</span> {s}</li>
                 ))}
               </ul>
             </div>
             <div className="bg-orange-500/10 backdrop-blur-lg rounded-xl p-5 border border-orange-500/20">
               <h3 className="text-orange-300 font-semibold mb-3">📈 Areas to Improve</h3>
               <ul className="space-y-2">
-                {evaluation.areasToImprove.map((a: string, i: number) => (
-                  <li key={i} className="text-gray-300 text-sm flex gap-2">
-                    <span>•</span> {a}
-                  </li>
+                {evaluation.areasToImprove.map((a, i) => (
+                  <li key={i} className="text-gray-300 text-sm flex gap-2"><span>•</span> {a}</li>
                 ))}
               </ul>
             </div>
@@ -301,10 +285,8 @@ export default function Home() {
           <div className="bg-blue-500/10 backdrop-blur-lg rounded-xl p-5 border border-blue-500/20 mb-6">
             <h3 className="text-blue-300 font-semibold mb-3">💡 Tips for Next Time</h3>
             <ul className="space-y-2">
-              {evaluation.tips.map((t: string, i: number) => (
-                <li key={i} className="text-gray-300 text-sm flex gap-2">
-                  <span>{i + 1}.</span> {t}
-                </li>
+              {evaluation.tips.map((t, i) => (
+                <li key={i} className="text-gray-300 text-sm flex gap-2"><span>{i + 1}.</span> {t}</li>
               ))}
             </ul>
           </div>
@@ -357,23 +339,18 @@ export default function Home() {
                   <span className="absolute inset-0 flex items-center justify-center text-2xl">🤖</span>
                 </div>
                 <p className="mt-6 text-gray-300 text-lg">Generating interview questions...</p>
-                <p className="text-gray-500 text-sm mt-1">Analyzing job description</p>
               </div>
             ) : (
               <>
-                <label className="block text-sm font-medium text-gray-300 mb-3">
-                  📋 Job Description
-                </label>
+                <label className="block text-sm font-medium text-gray-300 mb-3">📋 Job Description</label>
                 <textarea
                   className="w-full h-48 p-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none transition-all"
                   value={jd}
-                  onChange={(e: any) => setJd(e.target.value)}
+                  onChange={(e) => setJd(e.target.value)}
                   placeholder="Paste the full job description here..."
                 />
                 {error && (
-                  <div className="mt-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg text-red-300 text-sm">
-                    {error}
-                  </div>
+                  <div className="mt-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg text-red-300 text-sm">{error}</div>
                 )}
                 <button
                   onClick={generateInterview}
@@ -407,16 +384,13 @@ export default function Home() {
   // ---- INTERVIEW SCREEN ----
   const currentQ = questions[currentIndex];
   const progress = ((currentIndex + 1) / questions.length) * 100;
-  const answeredCount = answers.filter((a: string) => a && a.trim()).length;
+  const answeredCount = answers.filter((a) => a && a.trim()).length;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-3xl">
         <div className="flex items-center justify-between mb-6">
-          <button
-            onClick={resetInterview}
-            className="text-gray-400 hover:text-white transition-colors text-sm flex items-center gap-1"
-          >
+          <button onClick={resetInterview} className="text-gray-400 hover:text-white transition-colors text-sm">
             ← Exit
           </button>
           <div className="flex items-center gap-4">
@@ -426,10 +400,7 @@ export default function Home() {
         </div>
 
         <div className="w-full h-1.5 bg-white/10 rounded-full mb-8 overflow-hidden">
-          <div
-            className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-500"
-            style={{ width: `${progress}%` }}
-          />
+          <div className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
         </div>
 
         <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/10 shadow-2xl mb-6">
@@ -445,21 +416,13 @@ export default function Home() {
           <div className="flex gap-2 mt-6">
             <button
               onClick={() => setInputMode('voice')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                inputMode === 'voice'
-                  ? 'bg-purple-600 text-white'
-                  : 'bg-white/10 text-gray-400 hover:bg-white/20'
-              }`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${inputMode === 'voice' ? 'bg-purple-600 text-white' : 'bg-white/10 text-gray-400 hover:bg-white/20'}`}
             >
               🎤 Voice
             </button>
             <button
               onClick={() => setInputMode('text')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                inputMode === 'text'
-                  ? 'bg-purple-600 text-white'
-                  : 'bg-white/10 text-gray-400 hover:bg-white/20'
-              }`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${inputMode === 'text' ? 'bg-purple-600 text-white' : 'bg-white/10 text-gray-400 hover:bg-white/20'}`}
             >
               ⌨️ Text
             </button>
@@ -474,19 +437,20 @@ export default function Home() {
               >
                 🔁 Repeat
               </button>
-              {isListening ? (
+              {isRecording ? (
                 <button
-                  onClick={stopListening}
+                  onClick={stopRecording}
                   className="flex items-center gap-2 px-6 py-2.5 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all animate-pulse font-medium"
                 >
                   ⏹ Stop Recording
                 </button>
               ) : (
                 <button
-                  onClick={startListening}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-green-500 text-white rounded-xl hover:bg-green-600 transition-all font-medium"
+                  onClick={startRecording}
+                  disabled={isTranscribing}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-green-500 text-white rounded-xl hover:bg-green-600 transition-all font-medium disabled:opacity-50"
                 >
-                  🎤 Start Answer
+                  {isTranscribing ? '⏳ Transcribing...' : '🎤 Start Recording'}
                 </button>
               )}
             </div>
@@ -509,14 +473,17 @@ export default function Home() {
             </div>
           )}
 
-          {isListening && inputMode === 'voice' && (
-            <div className="mt-4 flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/30 rounded-xl">
-              <div className="flex gap-1">
-                <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
-              </div>
-              <span className="text-green-300 font-medium">Listening... Speak clearly now!</span>
+          {isRecording && (
+            <div className="mt-4 flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
+              <div className="w-3 h-3 bg-red-400 rounded-full animate-pulse" />
+              <span className="text-red-300 font-medium">Recording... Speak your answer.</span>
+            </div>
+          )}
+
+          {isTranscribing && (
+            <div className="mt-4 flex items-center gap-3 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-xl">
+              <div className="w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+              <span className="text-yellow-300 font-medium">Transcribing your audio...</span>
             </div>
           )}
         </div>
